@@ -1,0 +1,116 @@
+const User = require('../models/user')
+const Chat = require('../models/chat')
+const Room = require('../models/room')
+const bcrypt = require('bcrypt')
+const jwt = require('jsonwebtoken')
+exports.register = async (req, res) => {
+    const { firstName, lastName, email, password, rooms } = req.body
+    const hash = await bcrypt.hash(password, 10)
+    const newUser = new User({ firstName, lastName, email, password: hash, rooms })
+    console.log(newUser)
+    newUser.save((error, user) => {
+        if (error) {
+            res.status(500).send(error)
+        }
+        else {
+            res.status(200).json({ message: 'User Created Successfully', user })
+        }
+    })
+}
+exports.login = (req, res) => {
+    User.findOne({ email: req.body.email },
+        (error, user) => {
+            if (error) {
+                res.status(500).send(error)
+            }
+            bcrypt.compare(req.body.password, user.password, (error, isMatch) => {
+                if (error || !isMatch) {
+                    res.status(406).json({ message: error })
+                }
+                else {
+                    const token = jwt.sign({ id: user._id }, process.env.JWT_TOKEN)
+                    const response = { id: user._id, token: token , name: `${user.firstName} ${user.lastName}`}
+                    console.log(response)
+                    res.send(response)
+                }
+            })
+        })
+}
+exports.createRoom = (req, res) => {
+    const { name, users, currUser } = req.body
+    const newRoom = new Room({ name, users, currUser })
+    newRoom.save().then((room) => {
+        if (!room) {
+            res.status(400).json({ message: 'room not found' })
+        }
+        else {
+            res.status(200).json({ message: "room created" })
+            room.populate('users').then((room) => {
+                room.users.map((user) => {
+                    user.rooms.push(room._id)
+                    user.save()
+                })
+            })
+        }
+    })
+}
+exports.getIdByEmail = (req, res) => {
+    User.findOne({ email: req.body.email }, (error, user) => {
+        if (error) {
+            res.status(500).send(error)
+        }
+        else if (user === '') {
+            res.status(401).json({ message: 'user not found' })
+        }
+        else {
+            res.status(200).send(user._id)
+        }
+    })
+}
+exports.getNameById = (req, res) => {
+    User.findOne({ id: req.body.id }, (error, user) => {
+        if (error) {
+            res.status(500).send(error)
+        }
+        else if (user === '') {
+            res.status(401).json({ message: 'user not found' })
+        }
+        else {
+            res.status(200).send(user.firstName + ' ' + user.lastName)
+        }
+    })
+}
+exports.addMessage = (req, res) => {
+    const { message, sender, room } = req.body
+    const newMessage = new Chat({ message, sender, room })
+    newMessage.save((error, msg) => {
+        if (error) {
+            res.status(500).send(error)
+        }
+        else {
+            Room.findOne({ id: room }).then((room) => {
+                room.messages.push(newMessage._id)
+                room.save()
+            }).catch(err => res.json({ message: 'An error has occured trying to send this message' }))
+            res.status(200).json({ message: `message added successfully to room ${room}` })
+        }
+    })
+}
+exports.getUserRooms = (req, res) => {
+    User.findOne({ email: req.body.email }, (error, user) => {
+        if (error) {
+            res.status(500).send(error)
+        }
+        else {
+            // console.log("ffffff" , user)
+            user.populate('rooms').then((roomList) => {
+                res.status(200).json({ roomList: roomList.rooms })
+            }).catch((error) => console.log(error))
+        }
+    })
+}
+exports.getRoomMsg = (req, res) => {
+    Chat.find({ room: req.body.room }).then(messages => {
+        res.send(messages)
+    })
+}
